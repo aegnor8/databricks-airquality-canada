@@ -1,130 +1,135 @@
-![Databricks](https://img.shields.io/badge/Databricks-Unity%20Catalog-red?logo=databricks)
-![AWS](https://img.shields.io/badge/AWS-S3-orange?logo=amazon-aws)
-![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)
-![Status](https://img.shields.io/badge/Status-In%20Progress-yellow)
+# Canada Air Quality Pipeline
 
-# Air Quality Data Pipeline - Canada
+Real-time air quality monitoring pipeline using Databricks, Delta Lake, and AWS S3.
 
-Real-time air quality monitoring pipeline for Canada using OpenAQ API, Databricks Unity Catalog, and AWS S3.
+[![Databricks](https://img.shields.io/badge/Databricks-Unity%20Catalog-red?logo=databricks)](https://databricks.com)
+[![AWS](https://img.shields.io/badge/AWS-S3-orange?logo=amazon-aws)](https://aws.amazon.com)
+[![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit)](https://streamlit.io)
+
+## Live Demo
+
+🔗 **[Dashboard](https://databricks-airquality.streamlit.app/)** — Interactive map showing air quality across Canada
+
+## Overview
+
+End-to-end ELT pipeline that ingests air quality data from 480+ Canadian monitoring stations, transforms it through a medallion architecture (Bronze → Silver → Gold), and serves it via an interactive dashboard.
+
+**Key Features:**
+- Hourly data ingestion from OpenAQ API
+- Star schema for analytics (fact + dimensions)
+- Incremental loads with MERGE (no duplicates, full history)
+- Interactive Streamlit dashboard with animated time series
 
 ## Architecture
 ```mermaid
 flowchart LR
-    subgraph Source
-        API[OpenAQ API]
-    end
-    
+    API[OpenAQ API] --> Bronze
     subgraph Databricks
-        subgraph Jobs[Scheduled Jobs]
-            J1[Locations Ingestion]
-            J2[Measurements Ingestion]
-        end
-        subgraph Notebooks[Python Notebooks]
-            N1[Bronze → Silver]
-            N2[Silver → Gold]
-        end
-        UC[Unity Catalog]
+        Bronze[(Bronze)] --> Silver[(Silver)] --> Gold[(Gold)]
     end
+    Gold --> Dashboard[Streamlit]
+    Databricks --> S3[(AWS S3)]
+```
+
+## Data Model
+```mermaid
+erDiagram
+    fact_measurements ||--o{ dim_locations : location_id
+    fact_measurements ||--o{ dim_sensors : sensor_id
+    fact_measurements ||--o{ dim_parameters : parameter_id
+    fact_measurements ||--o{ dim_date : date_id
     
-    subgraph AWS
-        subgraph S3[S3 Data Lake]
-            B[(Bronze)]
-            Si[(Silver)]
-            G[(Gold)]
-        end
-    end
+    fact_measurements {
+        int sensor_id FK
+        int location_id FK
+        int parameter_id FK
+        date date_id FK
+        timestamp datetime_utc
+        double value
+    }
     
-    API --> Jobs
-    Jobs --> B
-    N1 --> Si
-    N2 --> G
-    B --> Si --> G
-    UC -.->|Governance| S3
-
+    dim_locations {
+        int location_id PK
+        string location_name
+        string locality
+        double latitude
+        double longitude
+    }
+    
+    dim_sensors {
+        int sensor_id PK
+        string sensor_name
+    }
+    
+    dim_parameters {
+        int parameter_id PK
+        string parameter_name
+        string parameter_units
+    }
+    
+    dim_date {
+        date date_id PK
+        int year
+        int month
+        int day
+    }
 ```
-
-## Data Architecture - Medallion
-
-| Layer | Table | Description | Update Frequency |
-|-------|-------|-------------|------------------|
-| Bronze | `locations` | Raw monitoring stations from OpenAQ API | Daily |
-| Bronze | `measurements` | Raw air quality measurements (latest values) | Every 6 hours (planned: hourly) |
-| Silver | TBD | Cleaned and validated data | - |
-| Gold | TBD | Aggregated metrics for analytics | - |
-
-## Infrastructure
-
-### AWS Resources
-
-**Region**: `us-east-1` (N. Virginia)
-
-| Resource | Name | Purpose |
-|----------|------|---------|
-| S3 Bucket | `mattia-airquality-datalake-use1` | Data lake storage (Delta Lake) |
-| IAM Role | `airquality-databricks-unity-catalog-role` | Cross-account access for Databricks |
-
-### Databricks Unity Catalog
-
-| Object | Name | Purpose |
-|--------|------|---------|
-| Catalog | `airquality` | Main container for air quality data |
-| Schema | `bronze` | Raw data layer |
-| Schema | `silver` | Cleaned data layer |
-| Schema | `gold` | Aggregated data layer |
-| Storage Credential | `airquality-s3-credential` | IAM Role authentication to S3 |
-| External Location | `airquality-external-location` | Maps S3 bucket to Unity Catalog |
-
-## Project Structure
-```
-airquality-pipeline-canada/
-├── README.md
-├── notebooks/
-│   ├── 00_utils.ipynb              # Shared configuration and functions
-│   ├── 01_bronze_locations_ingestion.ipynb    # Daily locations ingestion
-│   └── 02_bronze_measurements_ingestion.ipynb # Hourly measurements ingestion
-└── sql/
-    └── catalog_schema_creation.sql  # Unity Catalog setup
-```
-
-## Data Source
-
-**OpenAQ API v3** - Open air quality data from government monitoring stations worldwide.
-
-- **Locations endpoint**: `/v3/locations` - Monitoring station metadata
-- **Latest endpoint**: `/v3/locations/{id}/latest` - Most recent measurements
-- **Coverage**: ~480 active stations in Canada
-- **Parameters**: PM2.5, PM10, O3, NO2, SO2, CO, and more
-
-## Scheduled Jobs
-
-| Job | Schedule | Description |
-|-----|----------|-------------|
-| `bronze_locations_ingestion` | Daily | Fetches Canadian monitoring stations |
-| `bronze_measurements_ingestion` | Every 6 hours | Fetches latest air quality readings |
 
 ## Tech Stack
 
-- **Cloud**: AWS (S3, IAM)
-- **Data Platform**: Databricks (Unity Catalog, Delta Lake)
-- **Data Source**: OpenAQ API v3
-- **Languages**: Python, SQL
+| Layer | Technology |
+|-------|------------|
+| Ingestion | Python, OpenAQ API v3 |
+| Storage | AWS S3, Delta Lake |
+| Processing | Databricks, Spark SQL |
+| Orchestration | Databricks Workflows |
+| Governance | Unity Catalog |
+| Visualization | Streamlit, Plotly |
 
-## Status
+## Project Structure
+```
+├── notebooks/
+│   ├── 00_utils.ipynb                    # Configuration
+│   ├── 01_bronze_locations_ingestion.ipynb
+│   ├── 02_bronze_measurements_ingestion.ipynb
+│   ├── 03_silver_transformations.ipynb
+│   └── 04_gold_star_schema.ipynb
+├── dashboard/
+│   ├── app.py
+│   └── requirements.txt
+└── sql/
+    └── catalog_schema_creation.sql
+```
 
-- [x] AWS S3 bucket provisioned
-- [x] IAM Role with cross-account trust configured
-- [x] Databricks Unity Catalog setup (Catalog, Schemas)
-- [x] Storage Credential and External Location configured
-- [x] Bronze locations ingestion pipeline
-- [x] Bronze measurements ingestion pipeline
-- [x] Scheduled jobs configured
-- [ ] Silver layer transformations
-- [ ] Gold layer aggregations
-- [ ] Analytics dashboards
+## Local Development
+```bash
+# Clone repository
+git clone https://github.com/aegnor8/databricks-airquality-canada.git
+cd databricks-airquality-canada
 
-## Next Steps
+# Setup dashboard
+cd dashboard
+python -m venv venv
+venv\Scripts\activate  # Windows
+pip install -r requirements.txt
 
-1. Build Silver layer transformations (parsing JSON, data quality checks)
-2. Create Gold layer aggregations (daily averages, trends by region)
-3. Build analytics dashboard
-4. Increase measurements frequency to hourly
+# Configure secrets
+mkdir .streamlit
+echo 'DATABRICKS_HOST = "your-host"' > .streamlit/secrets.toml
+echo 'DATABRICKS_HTTP_PATH = "your-path"' >> .streamlit/secrets.toml
+echo 'DATABRICKS_TOKEN = "your-token"' >> .streamlit/secrets.toml
+
+# Run
+streamlit run app.py
+```
+
+## Pipeline Schedule
+
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| Locations | Daily 00:00 | Station metadata |
+| Measurements | Hourly | Air quality readings → Silver → Gold |
+
+## Author
+
+**Mattia Carganico** — [LinkedIn](https://www.linkedin.com/in/mattia-ca/) | [GitHub](https://github.com/aegnor8)
